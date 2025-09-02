@@ -31,6 +31,10 @@ export const ChatInput: FC<ChatInputProps> = ({}) => {
   })
 
   const [isTyping, setIsTyping] = useState<boolean>(false)
+  // Enhanced features
+  const [charCount, setCharCount] = useState<number>(0)
+  const [isDraftSaved, setIsDraftSaved] = useState<boolean>(false)
+  const [showCharCount, setShowCharCount] = useState<boolean>(false)
 
   const {
     isAssistantPickerOpen,
@@ -75,16 +79,58 @@ export const ChatInput: FC<ChatInputProps> = ({}) => {
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // Enhanced input change handler
+  const enhancedHandleInputChange = (value: string) => {
+    setCharCount(value.length)
+    setShowCharCount(value.length > 3500) // Show warning near limit
+    handleInputChange(value)
+    
+    // Auto-save draft
+    if (value.trim()) {
+      localStorage.setItem('chatDraft', value)
+      setIsDraftSaved(true)
+      setTimeout(() => setIsDraftSaved(false), 2000)
+    }
+  }
+
+  // Load draft on mount
+  useEffect(() => {
+    const draft = localStorage.getItem('chatDraft')
+    if (draft && !userInput) {
+      handleInputChange(draft)
+      setCharCount(draft.length)
+    }
+  }, [])
+
   useEffect(() => {
     setTimeout(() => {
       handleFocusChatInput()
     }, 200) // FIX: hacky
   }, [selectedPreset, selectedAssistant])
 
+  // Enhanced placeholder with context
+  const getPlaceholder = () => {
+    if (selectedAssistant) {
+      return t(`Ask ${selectedAssistant.name} anything... @ / # !`)
+    }
+    if (selectedTools.length > 0) {
+      return t(`Use your selected tools... @ / # !`)
+    }
+    return t(`Ask anything. Use @ for assistants, / for prompts, # for files, ! for tools`)
+  }
+
   const handleKeyDown = (event: React.KeyboardEvent) => {
+    // Enhanced shortcuts
+    if (event.ctrlKey && event.key === 'Enter') {
+      event.preventDefault()
+      handleSendMessage(userInput, chatMessages, false)
+    }
+
     if (!isTyping && event.key === "Enter" && !event.shiftKey) {
       event.preventDefault()
       setIsPromptPickerOpen(false)
+      // Clear draft on send
+      localStorage.removeItem('chatDraft')
       handleSendMessage(userInput, chatMessages, false)
     }
 
@@ -109,17 +155,6 @@ export const ChatInput: FC<ChatInputProps> = ({}) => {
       }
     }
 
-    if (event.key === "ArrowUp" && event.shiftKey && event.ctrlKey) {
-      event.preventDefault()
-      setNewMessageContentToPreviousUserMessage()
-    }
-
-    if (event.key === "ArrowDown" && event.shiftKey && event.ctrlKey) {
-      event.preventDefault()
-      setNewMessageContentToNextUserMessage()
-    }
-
-    //use shift+ctrl+up and shift+ctrl+down to navigate through chat history
     if (event.key === "ArrowUp" && event.shiftKey && event.ctrlKey) {
       event.preventDefault()
       setNewMessageContentToPreviousUserMessage()
@@ -239,11 +274,8 @@ export const ChatInput: FC<ChatInputProps> = ({}) => {
         <TextareaAutosize
           textareaRef={chatInputRef}
           className="ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring text-md flex w-full resize-none rounded-md border-none bg-transparent px-14 py-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-          placeholder={t(
-            // `Ask anything. Type "@" for assistants, "/" for prompts, "#" for files, and "!" for tools.`
-            `Ask anything. Type @  /  #  !`
-          )}
-          onValueChange={handleInputChange}
+          placeholder={getPlaceholder()}
+          onValueChange={enhancedHandleInputChange}
           value={userInput}
           minRows={1}
           maxRows={18}
@@ -252,6 +284,23 @@ export const ChatInput: FC<ChatInputProps> = ({}) => {
           onCompositionStart={() => setIsTyping(true)}
           onCompositionEnd={() => setIsTyping(false)}
         />
+
+        {/* Character count display */}
+        {(showCharCount || charCount > 0) && (
+          <div className={cn(
+            "absolute bottom-[50px] right-3 text-xs",
+            charCount > 3500 ? "text-red-500" : "text-gray-500"
+          )}>
+            {charCount}/4000
+          </div>
+        )}
+
+        {/* Draft saved indicator */}
+        {isDraftSaved && (
+          <div className="absolute bottom-[50px] left-14 text-xs text-green-500">
+            Draft saved
+          </div>
+        )}
 
         <div className="absolute bottom-[14px] right-3 cursor-pointer hover:opacity-50">
           {isGenerating ? (
@@ -269,6 +318,8 @@ export const ChatInput: FC<ChatInputProps> = ({}) => {
               onClick={() => {
                 if (!userInput) return
 
+                // Clear draft on send
+                localStorage.removeItem('chatDraft')
                 handleSendMessage(userInput, chatMessages, false)
               }}
               size={30}
